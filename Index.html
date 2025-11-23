@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>$TEARY</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+        body {
+            background-color: #020205; /* Fallback */
+            color: #e0e0e0;
+            font-family: 'VT323', monospace;
+            overflow: hidden;
+            touch-action: none;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* CRT Scanline Effect */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.2) 50%,
+                rgba(0,0,0,0.2)
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .neon-text {
+            text-shadow: 0 0 5px #39ff14, 0 0 15px #39ff14;
+        }
+        
+        .game-wrapper {
+            position: relative;
+            box-shadow: 0 0 25px rgba(57, 255, 20, 0.15), inset 0 0 20px rgba(57, 255, 20, 0.05);
+            border: 1px solid #1a1a1a;
+            /* Set the background image here */
+            background-image: url('1000016429.jpg');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+
+        canvas {
+            display: block;
+            /* Ensure canvas fits within view but maintains aspect */
+            max-width: 100%;
+            max-height: 80vh; 
+            background: transparent; /* Make canvas background transparent */
+        }
+
+        .btn-cyber {
+            background: transparent;
+            border: 1px solid #39ff14;
+            color: #39ff14;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: all 0.2s;
+            box-shadow: 0 0 5px #39ff14;
+            text-shadow: 0 0 2px #39ff14;
+        }
+        .btn-cyber:hover {
+            background: #39ff14;
+            color: #000;
+            box-shadow: 0 0 20px #39ff14;
+        }
+        .btn-cyber:active {
+            transform: scale(0.95);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="scanlines"></div>
+
+    <div class="z-20 w-full max-w-md px-4 mb-2 flex justify-between items-end">
+        <div>
+            <h1 class="text-4xl text-green-400 neon-text font-bold tracking-widest" style="color: #39ff14;">$TEARY</h1>
+        </div>
+        <div class="text-right">
+            <p id="scoreEl" class="text-3xl font-bold" style="color: #39ff14;">000</p>
+        </div>
+    </div>
+
+    <div class="game-wrapper z-20 rounded-sm overflow-hidden">
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+        
+        <div id="startScreen" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-30">
+            <h2 class="text-5xl mb-4 neon-text tracking-widest" style="color: #39ff14;">$TEARY</h2>
+            <p class="text-green-200 mb-8 text-xl opacity-70 animate-pulse">SYSTEM READY</p>
+            <button onclick="startGame()" class="btn-cyber px-8 py-2 text-2xl rounded font-bold cursor-pointer">PLAY</button>
+        </div>
+
+        <div id="gameOverScreen" class="hidden absolute inset-0 bg-black/95 flex flex-col items-center justify-center z-30">
+            <h2 class="text-4xl text-red-500 mb-2 font-bold" style="text-shadow: 0 0 15px red;">SIGNAL LOST</h2>
+            <p class="text-gray-400 mb-6 text-lg">SCORE: <span id="finalScore" class="text-white">0</span></p>
+            <div class="flex gap-4">
+                <button onclick="startGame()" class="btn-cyber px-6 py-2 text-xl rounded font-bold cursor-pointer" style="border-color: #ff3333; color: #ff3333;">RETRY</button>
+                <button onclick="closeGame()" class="btn-cyber px-6 py-2 text-xl rounded font-bold cursor-pointer border-gray-500 text-gray-500">EXIT</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Telegram Integration ---
+        const tg = window.Telegram.WebApp;
+        
+        // Tell Telegram the app is ready to be displayed
+        tg.ready();
+        // Expand to full height
+        tg.expand();
+        
+        // Apply Telegram theme colors if desired (optional, keeping Cyberpunk style for now)
+        // document.body.style.backgroundColor = tg.themeParams.bg_color;
+
+        function closeGame() {
+            tg.close();
+        }
+
+        // --- Game Logic ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('scoreEl');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreEl = document.getElementById('finalScore');
+
+        const GRID = 20;
+        const TILES = 20; 
+        const SPEED = 90; 
+        
+        const COL_SNAKE = '#39ff14'; 
+        const COL_SNAKE_HEAD = '#ffffff';
+        const COL_FOOD = '#00ccff'; 
+
+        let snake = [];
+        let food = { x: 10, y: 10 };
+        let dx = 0, dy = 0;
+        let score = 0;
+        let interval;
+        let isRunning = false;
+
+        const drops = [];
+        const MAX_DROPS = 40;
+
+        function initDrops() {
+            for(let i=0; i<MAX_DROPS; i++) {
+                drops.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    speed: 2 + Math.random() * 4,
+                    length: 5 + Math.random() * 15,
+                    opacity: 0.1 + Math.random() * 0.3
+                });
+            }
+        }
+
+        function updateDrops() {
+            drops.forEach(d => {
+                d.y += d.speed;
+                if(d.y > canvas.height) {
+                    d.y = -d.length;
+                    d.x = Math.random() * canvas.width;
+                }
+            });
+        }
+
+        function drawDrops() {
+            ctx.save();
+            drops.forEach(d => {
+                ctx.beginPath();
+                ctx.strokeStyle = `rgba(0, 204, 255, ${d.opacity})`; 
+                ctx.lineWidth = 1;
+                ctx.moveTo(d.x, d.y);
+                ctx.lineTo(d.x, d.y + d.length);
+                ctx.stroke();
+            });
+            ctx.restore();
+        }
+
+        let touchX=0, touchY=0;
+        
+        document.addEventListener('keydown', e => {
+            if(!isRunning) {
+                if(e.key === 'Enter' || e.key === ' ') {
+                     if(!startScreen.classList.contains('hidden')) startGame();
+                     if(!gameOverScreen.classList.contains('hidden')) startGame();
+                }
+                return;
+            }
+            switch(e.key) {
+                case 'ArrowLeft': if(dx!==1) {dx=-1; dy=0;} break;
+                case 'ArrowUp': if(dy!==1) {dx=0; dy=-1;} break;
+                case 'ArrowRight': if(dx!==-1) {dx=1; dy=0;} break;
+                case 'ArrowDown': if(dy!==-1) {dx=0; dy=1;} break;
+            }
+        });
+
+        document.addEventListener('touchstart', e => {
+            touchX = e.changedTouches[0].screenX;
+            touchY = e.changedTouches[0].screenY;
+        }, {passive:false});
+        
+        document.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
+        
+        document.addEventListener('touchend', e => {
+            if(!isRunning) return;
+            let tEndX = e.changedTouches[0].screenX;
+            let tEndY = e.changedTouches[0].screenY;
+            let dX = tEndX - touchX;
+            let dY = tEndY - touchY;
+            
+            if(Math.abs(dX) > Math.abs(dY)) {
+                if(Math.abs(dX) > 20) {
+                    if(dX > 0 && dx!==-1) {dx=1; dy=0;}
+                    else if(dX < 0 && dx!==1) {dx=-1; dy=0;}
+                }
+            } else {
+                if(Math.abs(dY) > 20) {
+                    if(dY > 0 && dy!==-1) {dx=0; dy=1;}
+                    else if(dY < 0 && dy!==1) {dx=0; dy=-1;}
+                }
+            }
+        }, {passive:false});
+
+        function resize() {
+            // Telegram specific resizing logic to fit the viewport perfectly
+            const viewportWidth = window.innerWidth;
+            // Cap size at 400, but allow smaller
+            const size = Math.min(viewportWidth - 30, 400);
+            
+            canvas.style.width = size + 'px';
+            canvas.style.height = size + 'px';
+        }
+        window.addEventListener('resize', resize);
+        resize();
+        initDrops(); 
+
+        function startGame() {
+            snake = [{x:10, y:10}, {x:9, y:10}, {x:8, y:10}];
+            score = 0;
+            dx = 1; dy = 0;
+            scoreEl.innerText = '000';
+            
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            
+            if(interval) clearInterval(interval);
+            isRunning = true;
+            interval = setInterval(loop, SPEED);
+        }
+
+        function loop() {
+            if(!isRunning) return;
+            update();
+            draw();
+        }
+
+        function update() {
+            const head = {x: snake[0].x + dx, y: snake[0].y + dy};
+            
+            if(head.x < 0 || head.x >= TILES || head.y < 0 || head.y >= TILES) return fail();
+            if(snake.some(p => p.x === head.x && p.y === head.y)) return fail();
+
+            snake.unshift(head);
+
+            if(head.x === food.x && head.y === food.y) {
+                score += 10;
+                scoreEl.innerText = score.toString().padStart(3,'0');
+                placeFood();
+            } else {
+                snake.pop();
+            }
+        }
+
+        function placeFood() {
+            let valid=false;
+            while(!valid) {
+                food.x = Math.floor(Math.random()*TILES);
+                food.y = Math.floor(Math.random()*TILES);
+                valid = !snake.some(p => p.x===food.x && p.y===food.y);
+            }
+        }
+
+        function fail() {
+            isRunning = false;
+            clearInterval(interval);
+            finalScoreEl.innerText = score;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        function draw() {
+            // Clear screen with transparent color so background image shows
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+
+            updateDrops();
+            drawDrops();
+
+            snake.forEach((p, i) => {
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = COL_SNAKE;
+                ctx.fillStyle = (i===0) ? COL_SNAKE_HEAD : COL_SNAKE;
+                ctx.fillRect(p.x*GRID+1, p.y*GRID+1, GRID-2, GRID-2);
+            });
+            ctx.shadowBlur = 0;
+
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = COL_FOOD;
+            ctx.fillStyle = COL_FOOD;
+            
+            const fx = food.x*GRID + GRID/2;
+            const fy = food.y*GRID + GRID/2;
+            const size = GRID/2 - 2;
+
+            ctx.beginPath();
+            ctx.arc(fx, fy + 2, size, 0, Math.PI, false);
+            ctx.lineTo(fx, fy - size - 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+        
+        function attractMode() {
+            if(!isRunning) {
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                updateDrops();
+                drawDrops();
+                requestAnimationFrame(attractMode);
+            }
+        }
+        attractMode();
+
+    </script>
+</body>
+</html>
