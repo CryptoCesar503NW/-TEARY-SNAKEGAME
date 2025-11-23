@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- 1. Browser Tab Title Updated -->
+    <title>$TEARY TEARDROP</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0d0d12;
+            color: #fff;
+            font-family: 'VT323', monospace;
+            overflow: hidden;
+            touch-action: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            border: 2px solid #333;
+            overflow: hidden;
+            background: linear-gradient(to bottom, #1a1a2e, #16213e);
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* UI Overlays */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10;
+        }
+        
+        .hidden { display: none !important; }
+
+        .btn-start {
+            background: #ef4444; /* Red for candles */
+            color: white;
+            border: 2px solid #fff;
+            padding: 10px 30px;
+            font-size: 24px;
+            font-family: 'VT323', monospace;
+            cursor: pointer;
+            text-transform: uppercase;
+            animation: pulse 1.5s infinite;
+            text-align: center;
+            line-height: 1.2;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        .score-board {
+            position: absolute;
+            top: 10%;
+            font-size: 4rem;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.2);
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .bg-pattern {
+            /* Faint chart pattern in background */
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div class="bg-pattern"></div>
+        <canvas id="gameCanvas"></canvas>
+        <div class="score-board" id="scoreDisplay">0</div>
+
+        <!-- Start Screen -->
+        <div id="startScreen" class="overlay">
+            <!-- 2. Main Game Title Updated -->
+            <h1 class="text-5xl mb-2 text-cyan-400" style="text-shadow: 0 0 10px cyan;">$TEARY TEARDROP</h1>
+            <p class="mb-8 text-gray-300">DODGE THE RED CANDLES!</p>
+            <button class="btn-start" onclick="startGame()">START AVOIDING RUGS</button>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="gameOverScreen" class="overlay hidden">
+            <h1 class="text-5xl mb-2 text-red-500" style="text-shadow: 0 0 10px red;">RUG PULLED!</h1>
+            <div class="bg-gray-800 p-4 rounded mb-6 text-center border border-gray-600">
+                <p class="text-gray-400 text-sm">SCORE</p>
+                <p class="text-3xl text-white mb-2" id="finalScore">0</p>
+                <p class="text-gray-400 text-sm">BEST</p>
+                <p class="text-xl text-green-400" id="bestScore">0</p>
+            </div>
+            <button class="btn-start" onclick="resetGame()">Continue to avoid rugs with TEARY</button>
+        </div>
+    </div>
+
+    <script>
+        // Setup Canvas
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Telegram Initialization
+        if (window.Telegram && window.Telegram.WebApp) {
+            const tg = window.Telegram.WebApp;
+            tg.ready();
+            tg.expand();
+        }
+
+        // Game State
+        let frames = 0;
+        let score = 0;
+        // Updated local storage key to match new name
+        let highScore = localStorage.getItem('teary_teardrop_high') || 0;
+        let gameSpeed = 2;
+        let isPlaying = false;
+        let isGameOver = false;
+        let loopId;
+
+        // Constants
+        const GRAVITY = 0.25;
+        const JUMP = 4.5;
+        const SPAWN_RATE = 100; 
+        
+        // Resize logic
+        function resize() {
+            const maxHeight = window.innerHeight;
+            const maxWidth = Math.min(window.innerWidth, 480);
+            canvas.width = maxWidth;
+            canvas.height = maxHeight;
+            ground.y = canvas.height - 50;
+        }
+        window.addEventListener('resize', resize);
+
+        // Objects
+        const bird = {
+            x: 50,
+            y: 150,
+            w: 36, 
+            h: 46, 
+            radius: 14, 
+            velocity: 0,
+            
+            draw: function() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                let rotation = Math.min(Math.PI / 4, Math.max(-Math.PI / 4, (this.velocity * 0.1)));
+                ctx.rotate(rotation);
+
+                // --- TEARDROP SHAPE (CUSTOM DRAWING) ---
+                ctx.fillStyle = '#00ccff';
+                ctx.beginPath();
+                // Top point
+                ctx.moveTo(0, -26); 
+                // Right curve
+                ctx.bezierCurveTo(18, -12, 19, 18, 0, 18); 
+                // Left curve
+                ctx.bezierCurveTo(-19, 18, -18, -12, 0, -26);
+                ctx.fill();
+
+                // --- HAT ---
+                ctx.fillStyle = '#111';
+                ctx.fillRect(-13, -24, 26, 6); // Brim
+                ctx.fillRect(-9, -36, 18, 12); // Top
+                ctx.fillStyle = '#cc0000';
+                ctx.fillRect(-9, -26, 18, 2); // Band
+
+                // --- HAPPY FILLED EYES ---
+                const eyeY = -4; 
+                const eyeXOff = 7;
+                
+                // Whites
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.ellipse(-eyeXOff, eyeY, 6.5, 7, 0, 0, Math.PI*2); 
+                ctx.ellipse(eyeXOff, eyeY, 6.5, 7, 0, 0, Math.PI*2); 
+                ctx.fill();
+                ctx.strokeStyle = '#333'; ctx.lineWidth = 0.5; ctx.stroke();
+
+                // Pupils (Filled)
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(-eyeXOff, eyeY, 3.5, 0, Math.PI*2); 
+                ctx.arc(eyeXOff, eyeY, 3.5, 0, Math.PI*2); 
+                ctx.fill();
+
+                // Shine
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(-eyeXOff+1.5, eyeY-1.5, 1.5, 0, Math.PI*2);
+                ctx.arc(eyeXOff+1.5, eyeY-1.5, 1.5, 0, Math.PI*2);
+                ctx.fill();
+
+                // --- SMILE ---
+                ctx.strokeStyle = '#005577';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 4, 8, 0.2, Math.PI - 0.2); 
+                ctx.stroke();
+
+                // --- RED BOWTIE ---
+                const tieY = 14; 
+                ctx.fillStyle = '#ff0000';
+                ctx.beginPath();
+                ctx.moveTo(0, tieY); ctx.lineTo(-7, tieY - 3); ctx.lineTo(-7, tieY + 3); ctx.closePath(); ctx.fill(); // Left
+                ctx.beginPath();
+                ctx.moveTo(0, tieY); ctx.lineTo(7, tieY - 3); ctx.lineTo(7, tieY + 3); ctx.closePath(); ctx.fill(); // Right
+                ctx.fillStyle = '#cc0000'; 
+                ctx.beginPath(); ctx.arc(0, tieY, 1.5, 0, Math.PI*2); ctx.fill(); // Knot
+                
+                ctx.restore();
+            },
+            
+            update: function() {
+                this.velocity += GRAVITY;
+                this.y += this.velocity;
+                if (this.y + this.h/2 >= ground.y) {
+                    this.y = ground.y - this.h/2;
+                    gameOver();
+                }
+                if (this.y - this.h/2 <= 0) {
+                    this.y = this.h/2;
+                    this.velocity = 0;
+                }
+            },
+            
+            flap: function() {
+                this.velocity = -JUMP;
+            }
+        };
+
+        const ground = {
+            y: 0, height: 50, x: 0,
+            draw: function() {
+                // Rug Pattern
+                ctx.fillStyle = '#5e2c2c'; 
+                ctx.fillRect(0, this.y, canvas.width, this.height);
+                ctx.fillStyle = '#8a3f3f';
+                for(let i = this.x % 40; i < canvas.width; i+=40) {
+                    ctx.fillRect(i, this.y + 5, 20, this.height - 10);
+                }
+                ctx.strokeStyle = '#d4af37'; 
+                ctx.beginPath(); ctx.moveTo(0, this.y); ctx.lineTo(canvas.width, this.y); ctx.stroke();
+            },
+            update: function() { this.x -= gameSpeed; }
+        };
+
+        const pipes = {
+            items: [],
+            draw: function() {
+                this.items.forEach(p => {
+                    // Candles
+                    ctx.fillStyle = '#ef4444'; ctx.strokeStyle = '#ef4444';
+                    
+                    // Top
+                    ctx.fillRect(p.x, 0, p.w, p.top);
+                    ctx.beginPath(); ctx.moveTo(p.x + p.w/2, p.top); ctx.lineTo(p.x + p.w/2, p.top + 20); ctx.stroke();
+                    
+                    // Bottom
+                    ctx.fillRect(p.x, canvas.height - p.bottom, p.w, p.bottom);
+                    ctx.beginPath(); ctx.moveTo(p.x + p.w/2, canvas.height - p.bottom); ctx.lineTo(p.x + p.w/2, canvas.height - p.bottom - 20); ctx.stroke();
+                    
+                    // Shadow
+                    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                    ctx.fillRect(p.x + p.w - 5, 0, 5, p.top);
+                    ctx.fillRect(p.x + p.w - 5, canvas.height - p.bottom, 5, p.bottom);
+                });
+            },
+            update: function() {
+                if (frames % SPAWN_RATE === 0) {
+                    const gap = 140; const minPipe = 50;
+                    const maxPipe = canvas.height - ground.height - gap - minPipe;
+                    const topHeight = Math.floor(Math.random() * (maxPipe - minPipe + 1) + minPipe);
+                    this.items.push({
+                        x: canvas.width, w: 50, top: topHeight,
+                        bottom: canvas.height - ground.height - (topHeight + gap), passed: false
+                    });
+                }
+                this.items.forEach(p => {
+                    p.x -= gameSpeed;
+                    if (bird.x + bird.w/2 - 5 > p.x && bird.x - bird.w/2 + 5 < p.x + p.w) {
+                        if (bird.y - bird.h/2 + 5 < p.top || bird.y + bird.h/2 - 5 > canvas.height - p.bottom) {
+                            gameOver();
+                        }
+                    }
+                    if (p.x + p.w < bird.x && !p.passed) {
+                        score++; scoreDisplay.innerText = score; p.passed = true;
+                        if(score % 5 === 0) gameSpeed += 0.2;
+                    }
+                });
+                if (this.items.length > 0 && this.items[0].x < -60) this.items.shift();
+            },
+            reset: function() { this.items = []; }
+        };
+
+        function loop() {
+            if (!isPlaying) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            frames++; ground.update(); ground.draw(); pipes.update(); pipes.draw(); bird.update(); bird.draw(); ground.draw();
+            if (!isGameOver) requestAnimationFrame(loop);
+        }
+
+        function startGame() {
+            document.getElementById('startScreen').classList.add('hidden');
+            resize(); bird.y = 150; bird.velocity = 0; pipes.reset(); score = 0; gameSpeed = 2; frames = 0;
+            scoreDisplay.innerText = score; isGameOver = false; isPlaying = true; loop();
+        }
+
+        function resetGame() {
+            document.getElementById('gameOverScreen').classList.add('hidden');
+            startGame();
+        }
+
+        function gameOver() {
+            isGameOver = true; isPlaying = false;
+            if (score > highScore) { highScore = score; localStorage.setItem('teary_teardrop_high', highScore); }
+            document.getElementById('finalScore').innerText = score;
+            document.getElementById('bestScore').innerText = highScore;
+            document.getElementById('gameOverScreen').classList.remove('hidden');
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.key === ' ') {
+                if (isPlaying) bird.flap(); else if (isGameOver) resetGame(); else startGame();
+            }
+        });
+        window.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (isPlaying) bird.flap(); else if (isGameOver) resetGame(); else startGame();
+        }, {passive: false});
+        
+        resize(); ground.draw();
+
+    </script>
+</body>
+</html>
+
+
